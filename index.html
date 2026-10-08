@@ -41,7 +41,7 @@ input,select{font:inherit;width:100%;padding:9px 10px;border:1px solid var(--lin
 .donut::after{content:"";position:absolute;inset:24px;border-radius:50%;background:var(--card)}
 .up{color:var(--bad)}.down{color:var(--acc)}
 nav{position:fixed;bottom:0;left:0;right:0;display:flex;background:var(--card);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom)}
-nav button{flex:1;border:0;border-radius:0;background:none;padding:14px 4px;color:var(--mut);font-weight:600}
+nav button{flex:1;border:0;border-radius:0;background:none;padding:14px 2px;color:var(--mut);font-weight:600;font-size:13px}
 nav button[aria-current=page]{color:var(--acc);box-shadow:inset 0 3px 0 var(--acc)}
 dialog{border:1px solid var(--line);border-radius:var(--r);background:var(--card);color:var(--ink);width:min(92vw,420px);padding:16px}
 dialog::backdrop{background:rgba(10,15,30,.55)}
@@ -59,7 +59,7 @@ svg text{fill:var(--mut);font-size:9px}
 <script>
 const $=s=>document.querySelector(s),K='cardledger.v1';
 let S;try{S=JSON.parse(localStorage.getItem(K))}catch(e){}
-S=S||{cards:[],bills:{},emis:[]};
+S=S||{cards:[],bills:{},emis:[]};S.exp=S.exp||[];
 const save=()=>localStorage.setItem(K,JSON.stringify(S));
 const uid=()=>Math.random().toString(36).slice(2,9);
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -77,6 +77,11 @@ const totals=m=>{const by={};let sum=0;S.cards.forEach(c=>{by[c.id]=amt(m,c.id);
 const emiOn=(e,m)=>e.start.slice(0,7)<=m&&m<=e.end.slice(0,7);
 const emiSum=m=>S.emis.filter(e=>emiOn(e,m)).reduce((a,e)=>a+e.amount,0);
 const card=id=>S.cards.find(c=>c.id===id);
+const CATS=['Rent','Electricity','Water & gas','Internet & phone','Groceries','Other'];
+const holder=id=>id==='acct'?'Bank account':(card(id)?card(id).name:'Card removed');
+const emiDirect=m=>S.emis.filter(e=>e.cardId==='acct'&&emiOn(e,m)).reduce((a,e)=>a+e.amount,0);
+const expSum=m=>S.exp.filter(x=>x.ym===m).reduce((a,x)=>a+x.amount,0);
+const outgo=()=>{const b=totals(ym).sum,d=emiDirect(ym),x=expSum(ym);return `<div class="box"><div class="mut">Total outgo in ${lbl(ym)}</div><div class="big num">${fmt(b+d+x)}</div>${[['Card bills',b],['EMIs from account',d],['Other expenses',x]].map(([n,v])=>`<div class="row sp mut" style="margin-top:4px"><span>${n}</span><b class="num" style="color:var(--ink)">${fmt(v)}</b></div>`).join('')}</div>`};
 
 function form(title,fields,onSave,onDel){
   const d=$('#dlg');
@@ -102,13 +107,13 @@ function yearChart(y){
 
 const views={
 overview(){
-  if(!S.cards.length)return empty('Add your first card to see spending charts.','cards');
+  if(!S.cards.length&&!S.exp.length&&!S.emis.length)return empty('Add a card or an expense to see spending charts.','cards');
   const y=+ym.slice(0,4),t=totals(ym),p=totals(shift(ym,-1)),ann=[...Array(12)].map((_,m)=>totals(ymOf(y,m)).sum);
   const yt=ann.reduce((a,b)=>a+b,0),active=ann.filter(Boolean).length,hi=ann.indexOf(Math.max(...ann));
   let acc=0;const stops=S.cards.map(c=>{const a=t.sum?t.by[c.id]/t.sum*360:0;const s=`${c.color} ${acc}deg ${acc+a}deg`;acc+=a;return s}).join(',');
   const dlt=t.sum-p.sum;
   return `${stepper()}
-  <div class="box"><div class="mut">Total bills in ${lbl(ym)}</div><div class="big num">${fmt(t.sum)}</div>
+  ${outgo()}<div class="box"><div class="mut">Card bills in ${lbl(ym)}</div><div class="big num">${fmt(t.sum)}</div>
   <div class="mut">${p.sum?`<span class="${dlt>0?'up':'down'}">${dlt>0?'▲':'▼'} ${fmt(Math.abs(dlt))}</span> vs ${lbl(shift(ym,-1))}`:'No earlier month to compare'} · EMIs running: ${fmt(emiSum(ym))}</div></div>
   <div class="box"><h3>By card</h3><div class="row"><div class="donut" style="background:${t.sum?`conic-gradient(${stops})`:'var(--line)'}"></div><div class="grow">
   ${S.cards.map(c=>`<div class="row sp" style="margin:6px 0"><span class="row"><i class="dot" style="background:${c.color}"></i>${esc(c.name)}</span><b class="num">${fmt(t.by[c.id])}</b></div>`).join('')}</div></div></div>
@@ -126,14 +131,23 @@ bills(){
 },
 emis(){
   const list=S.emis.map(e=>{
-    const tot=mdiff(e.start.slice(0,7),e.end.slice(0,7))+1,done=Math.max(0,Math.min(tot,mdiff(e.start.slice(0,7),NOW)+1)),left=tot-done,c=card(e.cardId);
+    const tot=mdiff(e.start.slice(0,7),e.end.slice(0,7))+1,done=Math.max(0,Math.min(tot,mdiff(e.start.slice(0,7),NOW)+1)),left=tot-done,cn=holder(e.cardId);
     const st=done<=0?'Not started':left===0?'Finished':`${left} left`;
-    return `<div class="box"><div class="row sp"><div class="grow"><b>${esc(e.name)}</b><span class="mut">${c?esc(c.name):'Card removed'} · ${e.start} → ${e.end}</span></div><button data-a="editEmi" data-id="${e.id}">Edit</button></div>
+    return `<div class="box"><div class="row sp"><div class="grow"><b>${esc(e.name)}</b><span class="mut">${esc(cn)} · ${e.start} → ${e.end}</span></div><button data-a="editEmi" data-id="${e.id}">Edit</button></div>
     <div class="row sp" style="margin-top:8px"><b class="num">${fmt(e.amount)}<span class="mut">/month</span></b><span class="tag">${st}</span></div>
     <div class="bar"><i style="width:${done/tot*100}%"></i></div><div class="mut" style="margin-top:6px">${done} of ${tot} paid · ${fmt(left*e.amount)} still to pay</div></div>`}).join('');
   const act=S.emis.filter(e=>emiOn(e,NOW));
   return `<div class="box"><div class="mut">Running EMIs this month</div><div class="big num">${fmt(emiSum(NOW))}</div><div class="mut">${act.length} active</div></div>
   <button class="pri" data-a="addEmi" style="width:100%;margin-bottom:12px">Add EMI</button>${list||'<div class="empty">No EMIs yet.</div>'}`;
+},
+expenses(){
+  const L=S.exp.filter(x=>x.ym===ym),sum=L.reduce((a,x)=>a+x.amount,0),cats={};
+  L.forEach(x=>cats[x.cat]=(cats[x.cat]||0)+x.amount);
+  return `${stepper()}<div class="box"><div class="mut">Other expenses in ${lbl(ym)}</div><div class="big num">${fmt(sum)}</div><div class="mut">Plus ${fmt(emiDirect(ym))} in EMIs paid from your account (see EMIs tab)</div>
+  ${Object.entries(cats).map(([c,v])=>`<div style="margin:8px 0"><div class="row sp"><span>${esc(c)}</span><b class="num">${fmt(v)}</b></div><div class="bar"><i style="width:${v/sum*100}%"></i></div></div>`).join('')}</div>
+  <button class="pri" data-a="addExp" style="width:100%;margin-bottom:8px">Add expense</button>
+  <button data-a="copyExp" style="width:100%;margin-bottom:12px">Copy from ${lbl(shift(ym,-1))}</button>
+  <div class="box">${L.map(x=>`<div class="item"><div class="grow"><b>${esc(x.name)}</b><span class="mut">${esc(x.cat)}</span></div><b class="num">${fmt(x.amount)}</b><button data-a="editExp" data-id="${x.id}">Edit</button></div>`).join('')||'<div class="empty">Nothing added for this month.</div>'}</div>`;
 },
 cards(){
   return `<h1>Cards</h1><div class="box">${S.cards.map(c=>`<div class="item"><i class="dot" style="background:${c.color}"></i><div class="grow"><b>${esc(c.name)}</b></div><button data-a="editCard" data-id="${c.id}">Edit</button></div>`).join('')||'<div class="empty">No cards yet.</div>'}
@@ -145,10 +159,11 @@ const stepper=()=>`<div class="stepper"><button data-a="mo" data-d="-1" aria-lab
 
 function render(){
   $('#app').innerHTML=views[tab]();
-  $('#nav').innerHTML=[['overview','Overview'],['bills','Bills'],['emis','EMIs'],['cards','Cards']].map(([k,n])=>`<button data-a="tab" data-t="${k}" ${k===tab?'aria-current="page"':''}>${n}</button>`).join('');
+  $('#nav').innerHTML=[['overview','Overview'],['bills','Bills'],['emis','EMIs'],['expenses','Expenses'],['cards','Cards']].map(([k,n])=>`<button data-a="tab" data-t="${k}" ${k===tab?'aria-current="page"':''}>${n}</button>`).join('');
 }
 const cardForm=c=>[{k:'name',l:'Card name',v:c?c.name:''},{k:'color',l:'Colour',t:'color',v:c?c.color:COL[S.cards.length%COL.length]}];
-const emiForm=e=>[{k:'name',l:'What is it for?',v:e?e.name:''},{k:'cardId',l:'Card',o:S.cards.map(c=>[c.id,c.name]),v:e?e.cardId:''},{k:'amount',l:'Monthly EMI amount',t:'number',v:e?e.amount:''},{k:'start',l:'Start date',t:'date',v:e?e.start:''},{k:'end',l:'End date',t:'date',v:e?e.end:''}];
+const emiForm=e=>[{k:'name',l:'What is it for?',v:e?e.name:''},{k:'cardId',l:'Paid from',o:[['acct','Bank account (direct debit)'],...S.cards.map(c=>[c.id,c.name])],v:e?e.cardId:''},{k:'amount',l:'Monthly EMI amount',t:'number',v:e?e.amount:''},{k:'start',l:'Start date',t:'date',v:e?e.start:''},{k:'end',l:'End date',t:'date',v:e?e.end:''}];
+const expForm=x=>[{k:'name',l:'Name',v:x?x.name:''},{k:'cat',l:'Category',o:CATS.map(c=>[c,c]),v:x?x.cat:'Rent'},{k:'amount',l:'Amount',t:'number',v:x?x.amount:''},{k:'ym',l:'Month',t:'month',v:x?x.ym:ym}];
 const emiSave=(o,e)=>{if(o.end<o.start){alert('End date must be after the start date.');return false}o.amount=+o.amount;e?Object.assign(e,o):S.emis.push({id:uid(),...o})};
 
 const A={
@@ -159,10 +174,13 @@ const A={
   copy:()=>{const p=S.bills[shift(ym,-1)];if(!p)return alert('Nothing entered for the previous month.');S.bills[ym]=S.bills[ym]||{};S.cards.forEach(c=>{if(p[c.id]&&!amt(ym,c.id))S.bills[ym][c.id]={amount:p[c.id].amount}});save();render()},
   addCard:()=>form('Add card',cardForm(),o=>{S.cards.push({id:uid(),...o})}),
   editCard:d=>{const c=card(d.id);form('Edit card',cardForm(c),o=>Object.assign(c,o),()=>{S.cards=S.cards.filter(x=>x.id!==c.id);Object.values(S.bills).forEach(m=>delete m[c.id]);S.emis.forEach(e=>{if(e.cardId===c.id)e.cardId=''})})},
-  addEmi:()=>{if(!S.cards.length)return alert('Add a card first.');form('Add EMI',emiForm(),o=>emiSave(o))},
+  addEmi:()=>{form('Add EMI',emiForm(),o=>emiSave(o))},
   editEmi:d=>{const e=S.emis.find(x=>x.id===d.id);form('Edit EMI',emiForm(e),o=>emiSave(o,e),()=>{S.emis=S.emis.filter(x=>x!==e)})},
+  addExp:()=>form('Add expense',expForm(),o=>{o.amount=+o.amount;S.exp.push({id:uid(),...o});ym=o.ym}),
+  editExp:d=>{const x=S.exp.find(v=>v.id===d.id);form('Edit expense',expForm(x),o=>{o.amount=+o.amount;Object.assign(x,o)},()=>{S.exp=S.exp.filter(v=>v!==x)})},
+  copyExp:()=>{const p=S.exp.filter(x=>x.ym===shift(ym,-1));if(!p.length)return alert('Nothing in the previous month.');p.forEach(x=>{if(!S.exp.some(y=>y.ym===ym&&y.name===x.name&&y.cat===x.cat))S.exp.push({...x,id:uid(),ym})});save();render()},
   export:()=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(S)],{type:'application/json'}));a.download=`card-ledger-${NOW}.json`;a.click()},
-  import:()=>{const i=document.createElement('input');i.type='file';i.accept='.json';i.onchange=async()=>{try{const j=JSON.parse(await i.files[0].text());if(!j.cards||!j.bills||!j.emis)throw 0;if(confirm('Replace current data with this file?')){S=j;save();render()}}catch(e){alert('That file is not a Card Ledger backup.')}};i.click()}
+  import:()=>{const i=document.createElement('input');i.type='file';i.accept='.json';i.onchange=async()=>{try{const j=JSON.parse(await i.files[0].text());if(!j.cards||!j.bills||!j.emis)throw 0;j.exp=j.exp||[];if(confirm('Replace current data with this file?')){S=j;save();render()}}catch(e){alert('That file is not a Card Ledger backup.')}};i.click()}
 };
 document.addEventListener('click',e=>{const a=e.target.closest('[data-a]');if(a&&A[a.dataset.a])A[a.dataset.a](a.dataset)});
 document.addEventListener('change',e=>{
