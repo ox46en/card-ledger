@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#14213D">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg">
+<link rel="apple-touch-icon" href="icon.svg">
+<title>Card Ledger</title>
+<style>
+:root{--bg:#EDF0F6;--ink:#14213D;--mut:#667089;--card:#fff;--line:#DCE1EC;--acc:#0F9D8A;--bad:#D6452A;--r:14px}
+@media(prefers-color-scheme:dark){:root{--bg:#0E1526;--ink:#E8ECF6;--mut:#8D97B2;--card:#172038;--line:#26314F;--acc:#2BC4AE;--bad:#FF7A5C}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;padding:env(safe-area-inset-top) 0 calc(76px + env(safe-area-inset-bottom))}
+main{max-width:560px;margin:0 auto;padding:14px}
+h1{font:700 22px Georgia,serif;margin:6px 0 14px}
+h3{margin:0 0 10px;font-size:15px}
+.num{font-variant-numeric:tabular-nums}
+.box{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:14px;margin-bottom:12px}
+.big{font:700 34px Georgia,serif}
+.mut{color:var(--mut);font-size:13px}
+.stepper{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+.stepper b{font-size:16px}
+button{font:inherit;cursor:pointer;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--ink);padding:8px 12px}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+.pri{background:var(--acc);border-color:var(--acc);color:#fff;font-weight:600}
+.danger{color:var(--bad);border-color:var(--bad)}
+.ghost{background:transparent}
+.row{display:flex;gap:8px;align-items:center}
+.sp{justify-content:space-between}
+.item{display:flex;align-items:center;gap:10px;padding:10px 0;border-top:1px solid var(--line)}
+.item:first-of-type{border-top:0}
+.dot{width:12px;height:12px;border-radius:50%;flex:none}
+.grow{flex:1;min-width:0}
+.grow b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+input,select{font:inherit;width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink)}
+.amt{width:110px;text-align:right}
+.bar{height:8px;border-radius:6px;background:var(--line);overflow:hidden;margin-top:6px}
+.bar i{display:block;height:100%;background:var(--acc)}
+.donut{width:112px;height:112px;border-radius:50%;flex:none;position:relative}
+.donut::after{content:"";position:absolute;inset:24px;border-radius:50%;background:var(--card)}
+.up{color:var(--bad)}.down{color:var(--acc)}
+nav{position:fixed;bottom:0;left:0;right:0;display:flex;background:var(--card);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom)}
+nav button{flex:1;border:0;border-radius:0;background:none;padding:14px 4px;color:var(--mut);font-weight:600}
+nav button[aria-current=page]{color:var(--acc);box-shadow:inset 0 3px 0 var(--acc)}
+dialog{border:1px solid var(--line);border-radius:var(--r);background:var(--card);color:var(--ink);width:min(92vw,420px);padding:16px}
+dialog::backdrop{background:rgba(10,15,30,.55)}
+dialog label{display:block;margin:10px 0;font-size:13px;color:var(--mut)}
+dialog label input,dialog label select{margin-top:4px}
+dialog .row{justify-content:flex-end;margin-top:14px}
+svg text{fill:var(--mut);font-size:9px}
+.empty{text-align:center;padding:26px 10px;color:var(--mut)}
+.tag{font-size:12px;padding:2px 8px;border-radius:20px;background:var(--bg);color:var(--mut)}
+</style></head>
+<body>
+<main id="app"></main>
+<nav id="nav"></nav>
+<dialog id="dlg"></dialog>
+<script>
+const $=s=>document.querySelector(s),K='cardledger.v1';
+let S;try{S=JSON.parse(localStorage.getItem(K))}catch(e){}
+S=S||{cards:[],bills:{},emis:[]};
+const save=()=>localStorage.setItem(K,JSON.stringify(S));
+const uid=()=>Math.random().toString(36).slice(2,9);
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmt=n=>'₹'+Math.round(n).toLocaleString('en-IN');
+const MN=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const COL=['#0F9D8A','#E4572E','#F2A541','#4C6FFF','#9B5DE5','#E83F8B','#3AA0D8','#7A8B2E'];
+const NOW=new Date().toISOString().slice(0,7);
+let tab='overview',ym=NOW;
+const ymOf=(y,m)=>`${y}-${String(m+1).padStart(2,'0')}`;
+const shift=(s,d)=>{const t=(+s.slice(0,4))*12+(+s.slice(5))-1+d;return ymOf(Math.floor(t/12),t%12)};
+const lbl=s=>`${MN[+s.slice(5)-1]} ${s.slice(0,4)}`;
+const mdiff=(a,b)=>(+b.slice(0,4)-+a.slice(0,4))*12+(+b.slice(5,7)-+a.slice(5,7));
+const amt=(m,c)=>(S.bills[m]&&S.bills[m][c]&&S.bills[m][c].amount)||0;
+const totals=m=>{const by={};let sum=0;S.cards.forEach(c=>{by[c.id]=amt(m,c.id);sum+=by[c.id]});return{by,sum}};
+const emiOn=(e,m)=>e.start.slice(0,7)<=m&&m<=e.end.slice(0,7);
+const emiSum=m=>S.emis.filter(e=>emiOn(e,m)).reduce((a,e)=>a+e.amount,0);
+const card=id=>S.cards.find(c=>c.id===id);
+
+function form(title,fields,onSave,onDel){
+  const d=$('#dlg');
+  d.innerHTML=`<form method="dialog"><h3>${title}</h3>${fields.map(f=>`<label>${f.l}${f.o?`<select name="${f.k}">${f.o.map(o=>`<option value="${o[0]}" ${o[0]==f.v?'selected':''}>${esc(o[1])}</option>`).join('')}</select>`:`<input name="${f.k}" type="${f.t||'text'}" value="${esc(f.v??'')}" ${f.t=='number'?'step="any" min="0" inputmode="decimal"':''} required>`}</label>`).join('')}<div class="row"><button value="x" class="ghost" formnovalidate>Cancel</button>${onDel?'<button type="button" id="del" class="danger">Delete</button>':''}<button value="ok" class="pri">Save</button></div></form>`;
+  const fm=d.querySelector('form');
+  fm.onsubmit=e=>{if(e.submitter&&e.submitter.value!=='ok')return;const o=Object.fromEntries(new FormData(fm));if(onSave(o)===false){e.preventDefault();return}save();render()};
+  if(onDel)d.querySelector('#del').onclick=()=>{if(confirm('Delete this? This cannot be undone.')){onDel();save();render();d.close()}};
+  d.showModal();
+}
+
+function yearChart(y){
+  const T=[...Array(12)].map((_,m)=>totals(ymOf(y,m)));
+  const mx=Math.max(1,...T.map(t=>t.sum));
+  let g='';
+  T.forEach((t,m)=>{
+    const k=ymOf(y,m);let top=130;
+    S.cards.forEach(c=>{const h=t.by[c.id]/mx*115;if(h>0){top-=h;g+=`<rect x="${m*28+4}" y="${top}" width="20" height="${h}" fill="${c.color}" rx="2"/>`}});
+    g+=`<rect data-a="pick" data-ym="${k}" x="${m*28}" y="0" width="28" height="150" fill="transparent" style="cursor:pointer"/>`;
+    g+=`<text x="${m*28+14}" y="144" text-anchor="middle" ${k===ym?'style="font-weight:700;fill:var(--ink)"':''}>${MN[m]}</text>`;
+  });
+  return `<svg viewBox="0 0 336 150" width="100%" role="img" aria-label="Monthly spend for ${y}"><line x1="0" y1="130" x2="336" y2="130" stroke="var(--line)"/>${g}</svg>`;
+}
+
+const views={
+overview(){
+  if(!S.cards.length)return empty('Add your first card to see spending charts.','cards');
+  const y=+ym.slice(0,4),t=totals(ym),p=totals(shift(ym,-1)),ann=[...Array(12)].map((_,m)=>totals(ymOf(y,m)).sum);
+  const yt=ann.reduce((a,b)=>a+b,0),active=ann.filter(Boolean).length,hi=ann.indexOf(Math.max(...ann));
+  let acc=0;const stops=S.cards.map(c=>{const a=t.sum?t.by[c.id]/t.sum*360:0;const s=`${c.color} ${acc}deg ${acc+a}deg`;acc+=a;return s}).join(',');
+  const dlt=t.sum-p.sum;
+  return `${stepper()}
+  <div class="box"><div class="mut">Total bills in ${lbl(ym)}</div><div class="big num">${fmt(t.sum)}</div>
+  <div class="mut">${p.sum?`<span class="${dlt>0?'up':'down'}">${dlt>0?'▲':'▼'} ${fmt(Math.abs(dlt))}</span> vs ${lbl(shift(ym,-1))}`:'No earlier month to compare'} · EMIs running: ${fmt(emiSum(ym))}</div></div>
+  <div class="box"><h3>By card</h3><div class="row"><div class="donut" style="background:${t.sum?`conic-gradient(${stops})`:'var(--line)'}"></div><div class="grow">
+  ${S.cards.map(c=>`<div class="row sp" style="margin:6px 0"><span class="row"><i class="dot" style="background:${c.color}"></i>${esc(c.name)}</span><b class="num">${fmt(t.by[c.id])}</b></div>`).join('')}</div></div></div>
+  <div class="box"><div class="row sp"><h3>${y} month by month</h3><span class="row"><button data-a="yr" data-d="-1" aria-label="Previous year">‹</button><button data-a="yr" data-d="1" aria-label="Next year">›</button></span></div>${yearChart(y)}
+  <div class="mut" style="margin-top:8px">Year total <b class="num">${fmt(yt)}</b> · Average ${fmt(active?yt/active:0)}/month${yt?` · Highest ${MN[hi]} (${fmt(ann[hi])})`:''}</div></div>
+  <div class="box"><h3>${y} by card</h3>${S.cards.map(c=>{const v=[...Array(12)].reduce((a,_,m)=>a+amt(ymOf(y,m),c.id),0);return `<div style="margin:8px 0"><div class="row sp"><span>${esc(c.name)}</span><b class="num">${fmt(v)}</b></div><div class="bar"><i style="width:${yt?v/yt*100:0}%;background:${c.color}"></i></div></div>`}).join('')}</div>`;
+},
+bills(){
+  if(!S.cards.length)return empty('Add a card first, then enter its monthly bill here.','cards');
+  const t=totals(ym);
+  return `${stepper()}<div class="box"><div class="row sp"><h3>Bills · ${lbl(ym)}</h3><b class="num">${fmt(t.sum)}</b></div>
+  ${S.cards.map(c=>{const b=(S.bills[ym]||{})[c.id]||{};return `<div class="item"><i class="dot" style="background:${c.color}"></i><div class="grow"><b>${esc(c.name)}</b><label class="mut row" style="gap:6px"><input type="checkbox" data-paid="${c.id}" ${b.paid?'checked':''} style="width:auto"> Paid</label></div>
+  <input class="amt num" type="number" inputmode="decimal" min="0" step="any" placeholder="0" value="${b.amount??''}" data-bill="${c.id}" aria-label="${esc(c.name)} bill for ${lbl(ym)}"></div>`}).join('')}</div>
+  <button data-a="copy" style="width:100%">Copy amounts from ${lbl(shift(ym,-1))}</button>`;
+},
+emis(){
+  const list=S.emis.map(e=>{
+    const tot=mdiff(e.start.slice(0,7),e.end.slice(0,7))+1,done=Math.max(0,Math.min(tot,mdiff(e.start.slice(0,7),NOW)+1)),left=tot-done,c=card(e.cardId);
+    const st=done<=0?'Not started':left===0?'Finished':`${left} left`;
+    return `<div class="box"><div class="row sp"><div class="grow"><b>${esc(e.name)}</b><span class="mut">${c?esc(c.name):'Card removed'} · ${e.start} → ${e.end}</span></div><button data-a="editEmi" data-id="${e.id}">Edit</button></div>
+    <div class="row sp" style="margin-top:8px"><b class="num">${fmt(e.amount)}<span class="mut">/month</span></b><span class="tag">${st}</span></div>
+    <div class="bar"><i style="width:${done/tot*100}%"></i></div><div class="mut" style="margin-top:6px">${done} of ${tot} paid · ${fmt(left*e.amount)} still to pay</div></div>`}).join('');
+  const act=S.emis.filter(e=>emiOn(e,NOW));
+  return `<div class="box"><div class="mut">Running EMIs this month</div><div class="big num">${fmt(emiSum(NOW))}</div><div class="mut">${act.length} active</div></div>
+  <button class="pri" data-a="addEmi" style="width:100%;margin-bottom:12px">Add EMI</button>${list||'<div class="empty">No EMIs yet.</div>'}`;
+},
+cards(){
+  return `<h1>Cards</h1><div class="box">${S.cards.map(c=>`<div class="item"><i class="dot" style="background:${c.color}"></i><div class="grow"><b>${esc(c.name)}</b></div><button data-a="editCard" data-id="${c.id}">Edit</button></div>`).join('')||'<div class="empty">No cards yet.</div>'}
+  <button class="pri" data-a="addCard" style="width:100%;margin-top:8px">Add card</button></div>
+  <div class="box"><h3>Backup</h3><p class="mut" style="margin-top:0">Data lives only on this device. Export a copy now and then.</p><div class="row"><button data-a="export">Export</button><button data-a="import">Import</button></div></div>`;
+}};
+const empty=(m,go)=>`<div class="box empty">${m}<br><br><button class="pri" data-a="tab" data-t="${go}">Go to ${go}</button></div>`;
+const stepper=()=>`<div class="stepper"><button data-a="mo" data-d="-1" aria-label="Previous month">‹</button><b>${lbl(ym)}</b><button data-a="mo" data-d="1" aria-label="Next month">›</button></div>`;
+
+function render(){
+  $('#app').innerHTML=views[tab]();
+  $('#nav').innerHTML=[['overview','Overview'],['bills','Bills'],['emis','EMIs'],['cards','Cards']].map(([k,n])=>`<button data-a="tab" data-t="${k}" ${k===tab?'aria-current="page"':''}>${n}</button>`).join('');
+}
+const cardForm=c=>[{k:'name',l:'Card name',v:c?c.name:''},{k:'color',l:'Colour',t:'color',v:c?c.color:COL[S.cards.length%COL.length]}];
+const emiForm=e=>[{k:'name',l:'What is it for?',v:e?e.name:''},{k:'cardId',l:'Card',o:S.cards.map(c=>[c.id,c.name]),v:e?e.cardId:''},{k:'amount',l:'Monthly EMI amount',t:'number',v:e?e.amount:''},{k:'start',l:'Start date',t:'date',v:e?e.start:''},{k:'end',l:'End date',t:'date',v:e?e.end:''}];
+const emiSave=(o,e)=>{if(o.end<o.start){alert('End date must be after the start date.');return false}o.amount=+o.amount;e?Object.assign(e,o):S.emis.push({id:uid(),...o})};
+
+const A={
+  tab:d=>{tab=d.t;render()},
+  mo:d=>{ym=shift(ym,+d.d);render()},
+  yr:d=>{ym=shift(ym,12*d.d);render()},
+  pick:d=>{ym=d.ym;render()},
+  copy:()=>{const p=S.bills[shift(ym,-1)];if(!p)return alert('Nothing entered for the previous month.');S.bills[ym]=S.bills[ym]||{};S.cards.forEach(c=>{if(p[c.id]&&!amt(ym,c.id))S.bills[ym][c.id]={amount:p[c.id].amount}});save();render()},
+  addCard:()=>form('Add card',cardForm(),o=>{S.cards.push({id:uid(),...o})}),
+  editCard:d=>{const c=card(d.id);form('Edit card',cardForm(c),o=>Object.assign(c,o),()=>{S.cards=S.cards.filter(x=>x.id!==c.id);Object.values(S.bills).forEach(m=>delete m[c.id]);S.emis.forEach(e=>{if(e.cardId===c.id)e.cardId=''})})},
+  addEmi:()=>{if(!S.cards.length)return alert('Add a card first.');form('Add EMI',emiForm(),o=>emiSave(o))},
+  editEmi:d=>{const e=S.emis.find(x=>x.id===d.id);form('Edit EMI',emiForm(e),o=>emiSave(o,e),()=>{S.emis=S.emis.filter(x=>x!==e)})},
+  export:()=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(S)],{type:'application/json'}));a.download=`card-ledger-${NOW}.json`;a.click()},
+  import:()=>{const i=document.createElement('input');i.type='file';i.accept='.json';i.onchange=async()=>{try{const j=JSON.parse(await i.files[0].text());if(!j.cards||!j.bills||!j.emis)throw 0;if(confirm('Replace current data with this file?')){S=j;save();render()}}catch(e){alert('That file is not a Card Ledger backup.')}};i.click()}
+};
+document.addEventListener('click',e=>{const a=e.target.closest('[data-a]');if(a&&A[a.dataset.a])A[a.dataset.a](a.dataset)});
+document.addEventListener('change',e=>{
+  const t=e.target;
+  if(t.dataset.bill){S.bills[ym]=S.bills[ym]||{};const b=S.bills[ym][t.dataset.bill]=S.bills[ym][t.dataset.bill]||{};b.amount=Math.max(0,+t.value||0);save();render()}
+  if(t.dataset.paid){S.bills[ym]=S.bills[ym]||{};const b=S.bills[ym][t.dataset.paid]=S.bills[ym][t.dataset.paid]||{};b.paid=t.checked;save()}
+});
+render();
+if('serviceWorker'in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
+</script></body></html>
